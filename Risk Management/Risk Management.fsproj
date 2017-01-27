@@ -58,6 +58,7 @@
     <Compile Include="Program.fs" />
     <None Include="App.config" />
     <Content Include="packages.config" />
+    <None Include="Workshop2 data.csv" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Deedle">
