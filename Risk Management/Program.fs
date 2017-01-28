@@ -71,11 +71,11 @@ let weightedHistoricalSimulation confidence eta days (data:Frame<DateTime,_>) da
     subframe?Weight <- Frame.mapRowValues toWeight subframe
 
     let sorted = subframe.SortRowsBy("Return",fun i -> i)                               // sorted by returns
-    sorted?AcumWeight <- Series.scanValues (fun acum w -> acum + w) 0. sorted?Weight    // create column of accumulated weights
+    sorted?AccumWeight <- Series.scanValues (fun accum w -> accum + w) 0. sorted?Weight    // create column of accumulated weights
 
     let filtered =                                                                      // days with accum weight smaller than (1-confidence)
         sorted
-        |> Frame.filterRows (fun _ row -> row?AcumWeight < (1. - confidence))
+        |> Frame.filterRows (fun _ row -> row?AccumWeight < (1. - confidence))
 
     if filtered.RowCount = 0
     then
