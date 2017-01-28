@@ -117,12 +117,11 @@ let monthlyReturns (series:Series<DateTime,_>) =
 
     Series.aggregateInto aggregator keyGen valueGen series
 
-let empiricalExpectedShortfall var (data:Series<DateTime,_>) =
-    data
-    |> Series.filter (fun _ ret -> ret < -var) // returns worse than -var
-    |> Series.values
-    |> Seq.average                             // - expected shortfall
-    |> (*) -1.                                 // expected shortfall
+let empiricalExpectedShortfall var =
+    Series.filter (fun _ ret -> ret < -var) // returns worse than -var
+    >> Series.values
+    >> Seq.average                          // - expected shortfall
+    >> (*) -1.                              // expected shortfall
 
 // Exercises from the book Elements of Financial Risk Management, 2nd Edition by Peter F. Christoffersen. Published by AP
 // The data and solutions for the exercises are available at: http://booksite.elsevier.com/9780123744487/
