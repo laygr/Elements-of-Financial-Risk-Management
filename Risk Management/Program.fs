@@ -89,6 +89,7 @@ let weightedHistoricalSimulation confidence eta days (data:Frame<DateTime,_>) da
     |> (*) -1.                        // in any case, multiply it by -1 to get the VaR
 
 // page 34
+// Value at risk
 // assuming normality:
 let var confidence mean stdDev =
     -MathNet.Numerics.Distributions.Normal(mean, stdDev).InverseCumulativeDistribution(1.-confidence)
