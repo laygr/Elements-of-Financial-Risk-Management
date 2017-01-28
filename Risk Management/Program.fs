@@ -22,16 +22,15 @@ let returnWhenLonging (frame:Frame<DateTime,string>) =
 let returnWhenShorting (frame:Frame<DateTime,string>) =
     log (Frame.shift 1 frame)?Close - log (frame?Close)
 
-let RiskMetrics lambda (frame:Frame<DateTime,string>) =
-    let v = Stats.variance frame?Return
+// page 12
+let RiskMetrics lambda startingVariance (series:Series<DateTime,float>) =
     let next pastVariance' pastReturn' =
         match pastVariance', pastReturn' with
-        | Some pastVariance, Some pastReturn -> Some (lambda * pastVariance + (1.-lambda) * pastReturn)
+        | Some pastVariance, Some pastReturn -> Some (lambda * pastVariance + (1.-lambda) * pastReturn ** 2.)
         | _ -> pastVariance'
 
-    Frame.shift 1 frame
-    |> Frame.getCol("Return")
-    |> Series.scanAllValues next (Some v)
+    Series.shift 1 series
+    |> Series.scanAllValues next (Some startingVariance)
 
 let nDaysBefore days (data:Frame<_,_>) day =
     data.GetSubrange(None, Some (day, Indices.Exclusive))
@@ -50,14 +49,13 @@ let nRowsBeforeKey rows (data:Frame<_,_>) key =
 let mapKey (f:'a -> 'b) (frame:Frame<_,_>) =
     Series.map (fun k _ -> f k) (frame.GetColumnAt 0)
 
-let historicalSimulation confidence (days:int) (data:Frame<DateTime,string>) (day:DateTime) =
-    (nRowsBeforeKey days data day)?Return
-    |> Series.values
-    |> fun v -> Statistics.quantileCustomFunc v QuantileDefinition.Excel
-    |> (|>) (1. - confidence)
-    |> (*) -1.
+let historicalSimulation confidence =
+    Series.values
+    >> fun v -> Statistics.quantileCustomFunc v QuantileDefinition.Excel
+    >> (|>) (1. - confidence)
+    >> (*) -1.
 
-let weightedHistoricalSimulation confidence eta (days:int) (data:Frame<DateTime,_>) (day:DateTime) =
+let weightedHistoricalSimulation confidence eta days (data:Frame<DateTime,_>) day =
     let subframe = nRowsBeforeKey days (data.Clone()) day
 
     let taus = Series.scanValues (fun counter next -> counter - 1) (days+1) (subframe.GetColumnAt(0))
@@ -72,25 +70,41 @@ let weightedHistoricalSimulation confidence eta (days:int) (data:Frame<DateTime,
 
     subframe?Weight <- Frame.mapRowValues toWeight subframe
 
-    let sorted = subframe.SortRowsBy("Return",fun i -> i)
-    sorted?AcumWeight <- Series.scanValues (fun acum w -> acum + w) 0. sorted?Weight
+    let sorted = subframe.SortRowsBy("Return",fun i -> i)                               // sorted by returns
+    sorted?AcumWeight <- Series.scanValues (fun acum w -> acum + w) 0. sorted?Weight    // create column of accumulated weights
 
-    let filtered = 
+    let filtered =                                                                      // days with accum weight smaller than (1-confidence)
         sorted
-        |> Frame.filterRows (fun _ row -> row?AcumWeight < confidence)
+        |> Frame.filterRows (fun _ row -> row?AcumWeight < (1. - confidence))
 
     if filtered.RowCount = 0
     then
         sorted
         |> Frame.getCol("Return")
-        |> Series.firstValue
+        |> Series.firstValue           // return the first day if no day has acumm weight smaller than (1-confidence)
     else
         filtered
         |> Frame.getCol("Return")
-        |> Series.lastValue
-    |> (*) -1.
+        |> Series.lastValue           // else, return the last day of the days with accum weight smaller than (1-confidence)
+    |> (*) -1.                        // in any case, multiply it by -1 to get the VaR
 
-let monthlyReturns (frame:Frame<DateTime,_>) =
+// page 34
+// assuming normality:
+let var confidence mean stdDev =
+    -MathNet.Numerics.Distributions.Normal(mean, stdDev).InverseCumulativeDistribution(1.-confidence)
+
+let stdDevFromVaR varsConfidence var =
+    let normal = MathNet.Numerics.Distributions.Normal()
+    - var/normal.InverseCumulativeDistribution(1.-varsConfidence)
+
+// page 34
+// assuming normality:
+let expectedShortfall confidence stdDev =
+    let p = 1. - confidence
+    let normal = MathNet.Numerics.Distributions.Normal()
+    stdDev * normal.Density(normal.InverseCumulativeDistribution(p)) / p
+
+let monthlyReturns (series:Series<DateTime,_>) =
     let aggregator = Aggregation.ChunkWhile<DateTime>(fun a b -> a.Year = b.Year && a.Month = b.Month)
     let keyGen (s:DataSegment<Series<DateTime,float>>) =
         let firstDayOfMonth (date:DateTime) = DateTime(date.Year, date.Month, 1)
@@ -100,16 +114,14 @@ let monthlyReturns (frame:Frame<DateTime,_>) =
         |> Some
         |> OptionalValue.ofOption
 
-    Series.aggregateInto aggregator keyGen valueGen (frame?Return)
+    Series.aggregateInto aggregator keyGen valueGen series
 
-let historicalSimulationExpectedShortfall confidence days (data:Frame<DateTime,_>) day =
-    let VaR = historicalSimulation confidence days data day
-
-    (nDaysBefore 250 data day)?Return              // previous 250 daily returns
-    |> Series.filter (fun _ ret -> ret < -VaR) // returns worse than -(01/01/08 VaR)
+let empiricalExpectedShortfall var (data:Series<DateTime,_>) =
+    data
+    |> Series.filter (fun _ ret -> ret < -var) // returns worse than -var
     |> Series.values
-    |> Seq.average                                          // 01/01/08 expected shortfall
-    |> (*) -1.
+    |> Seq.average                             // - expected shortfall
+    |> (*) -1.                                 // expected shortfall
 
 // Exercises from the book Elements of Financial Risk Management, 2nd Edition by Peter F. Christoffersen. Published by AP
 // The data and solutions for the exercises are available at: http://booksite.elsevier.com/9780123744487/
@@ -139,9 +151,9 @@ The trading limit is $100,000 and the trader starts its trading on December 31, 
 (*
 W2 3.- a)
 What is the 1-month 5%-VaR for January 2008?
-Compute it using RiskMetrics with a λ=0.94
-for the first trading day of January 200
-and multiply it by square root of 22 to get the monthly VaR.
+Compute it using monthly returns,
+using RiskMetrics with a λ=0.94,
+for the first trading day of January 2008
 *)
 let w2_3_a =
     let data =
@@ -150,11 +162,21 @@ let w2_3_a =
         |> Frame.sortRowsByKey
     data?Return <- returnWhenLonging data
 
-    let lo = DateTime(2001,01,01), Indices.BoundaryBehavior.Inclusive
-    let hi = DateTime(2008,01,01), Indices.BoundaryBehavior.Exclusive
-    data.GetSubrange(Some lo, Some hi)
-    |> RiskMetrics 0.94
-    // work in progress
+    let monthlyReturns = monthlyReturns (data?Return)
+    let sampleVariance = Statistics.Variance(monthlyReturns.Values)
+
+    let monthlyVariances =
+        monthlyReturns
+        |> RiskMetrics 0.94 sampleVariance
+       
+    let varForMonth (month:DateTime) =
+        monthlyVariances.[month]
+        |> Math.Sqrt
+        |> var 0.95 0.
+
+    let january2008 = DateTime(2008,01,01)
+    varForMonth january2008
+    
 
 (*
 W2 4.- a)
@@ -170,11 +192,25 @@ let w2_4_a =
     data?Return <- returnWhenLonging data
 
     let ``08/01/02`` = DateTime(2008,01,02)                             // First trading date of January 2008
-    historicalSimulationExpectedShortfall 0.95 250 data ``08/01/02``    // January 02 2008 expected shortfall
+    let simulationData = (nRowsBeforeKey 250 data ``08/01/02``)?Return
+    let VaR = historicalSimulation 0.95 simulationData
+
+    empiricalExpectedShortfall VaR simulationData                       // January 02 2008 expected shortfall
     |> (*) (Math.Sqrt 22.)                                              // January 2008 expected shortfall
 
+(*
+W2 4.- b)
+Compute de 5% Expected Shortfall for January 2008 using as VaR the VaR obtained in W2 3.- a)
+*)
+let w2_4_b =
+    let VaR = w2_3_a
+    let stdDev = stdDevFromVaR 0.95 VaR
+    expectedShortfall 0.95 stdDev
+
 let workshop2 () =
+    printfn "3.- a) %f" w2_3_a
     printfn "4.- a) %f" w2_4_a
+    printfn "4.- b) %f" w2_4_b
 
 [<EntryPoint>]
 let main argv =
