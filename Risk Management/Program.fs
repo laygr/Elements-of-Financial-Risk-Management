@@ -93,6 +93,7 @@ let weightedHistoricalSimulation confidence eta days (data:Frame<DateTime,_>) da
 let var confidence mean stdDev =
     -MathNet.Numerics.Distributions.Normal(mean, stdDev).InverseCumulativeDistribution(1.-confidence)
 
+// assuming normality:
 let stdDevFromVaR varsConfidence var =
     let normal = MathNet.Numerics.Distributions.Normal()
     - var/normal.InverseCumulativeDistribution(1.-varsConfidence)
