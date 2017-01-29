@@ -36,14 +36,21 @@ let nDaysBefore days (data:Frame<_,_>) day =
     data.GetSubrange(None, Some (day, Indices.Exclusive))
     |> Frame.takeLast days
 
+// index for row with key
+// index starting at 0
+let indexForKey (frame:Frame<'K,_>) (key:'K) =
+    frame.RowIndex.Locate key
+    |> frame.RowIndex.AddressOperations.OffsetOf
+
+// position of row with key.
+// Index beginning with 1
 let positionForKey (frame:Frame<'K,_>) (key:'K) =
-    frame.RowKeys
-    |> Seq.findIndex (fun k -> k = key)
-    |> (+) 1
+    indexForKey frame key
+    |> (+) (int64 1)
 
 let nRowsBeforeKey rows (data:Frame<_,_>) key =
     data
-    |> Frame.take ((positionForKey data key)-1)
+    |> Frame.take (int (indexForKey data key))
     |> Frame.takeLast rows
 
 let mapKey (f:'a -> 'b) (frame:Frame<_,_>) =
