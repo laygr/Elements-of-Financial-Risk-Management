@@ -1,9 +1,10 @@
-﻿module RiskManagement
+﻿module RiskM
 
 open Deedle
 open System
+open MathNet.Numerics.LinearRegression
 open MathNet.Numerics.Statistics
-
+open MathNet.Numerics.Distributions
 (*
 let toDateTime (os:ObjectSeries<_>) =
     let year = (os.Get "Year") :?> int
@@ -62,38 +63,29 @@ let historicalSimulation confidence =
     >> (|>) (1. - confidence)
     >> (*) -1.
 
-let weightedHistoricalSimulation confidence eta days (data:Frame<DateTime,_>) day =
-    let subframe = nRowsBeforeKey days (data.Clone()) day
-
-    let taus = Series.scanValues (fun counter next -> counter - 1) (days+1) (subframe.GetColumnAt(0))
-    subframe?Tau <- taus
+let weightedHistoricalSimulation confidence eta (data':Frame<DateTime,_>) =
+    let data = data'.Clone()
+    let days = data.RowCount
+    let taus = Series.scanValues (fun counter next -> counter - 1) (days+1) (data.GetColumnAt(0))
+    data?Tau <- taus
     
     let weight tau =
       eta**(float(tau - 1)) * (1.-eta)/(1.-eta ** (float days))
 
-    let toWeight (os:ObjectSeries<_>) =
+    let toWeight (os:ObjectSeries<_>) = // giver a row, it returns its corresponding weight
         let tau = (os.Get "Tau") :?> int
         weight tau
 
-    subframe?Weight <- Frame.mapRowValues toWeight subframe
+    data?Weight <- Frame.mapRowValues toWeight data // adds a column with the weigths
 
-    let sorted = subframe.SortRowsBy("Return",fun i -> i)                               // sorted by returns
-    sorted?AccumWeight <- Series.scanValues (fun accum w -> accum + w) 0. sorted?Weight    // create column of accumulated weights
-
-    let filtered =                                                                      // days with accum weight smaller than (1-confidence)
-        sorted
-        |> Frame.filterRows (fun _ row -> row?AccumWeight < (1. - confidence))
-
-    if filtered.RowCount = 0
-    then
-        sorted
-        |> Frame.getCol("Return")
-        |> Series.firstValue           // return the first day if no day has acumm weight smaller than (1-confidence)
-    else
-        filtered
-        |> Frame.getCol("Return")
-        |> Series.lastValue           // else, return the last day of the days with accum weight smaller than (1-confidence)
-    |> (*) -1.                        // in any case, multiply it by -1 to get the VaR
+    let sorted = data.SortRows("Return")                                                // sorted by returns
+    sorted?AccumWeight <- Series.scanValues (fun accum w -> accum + w) 0. sorted?Weight // create column of accumulated weights
+                                                                // days with accum weight smaller than (1-confidence)
+    sorted
+    |> Frame.filterRows (fun _ row -> row?AccumWeight >= (1. - confidence))
+    |> Frame.getCol("Return")
+    |> Series.firstValue          // return the first day of the days with accum weight equal or larger than (1-confidence)
+    |> (*) -1.                    // multiply it by -1 to get the VaR
 
 // page 34
 // Value at risk
@@ -131,6 +123,30 @@ let empiricalExpectedShortfall var =
     >> Seq.average                          // - expected shortfall
     >> (*) -1.                              // expected shortfall
 
+let autocorrelationWithLag (values:float[]) lag =
+    let valuesLength  = values.Length
+    let beforeValues = Array.init (lag + valuesLength) (fun i -> if i < lag then 0. else values.[i-lag])
+    let afterValues = Array.init (lag + valuesLength) (fun i -> if i >= valuesLength then 0. else values.[i])
+    let (slope,intercept) = SimpleRegression.Fit(beforeValues,afterValues)
+    let errors = Array.init (lag + valuesLength ) (fun i -> afterValues.[i] - intercept - slope * beforeValues.[i])
+    let errorsVariance = Statistics.Variance errors
+    let ssx = Array.fold (fun acum x -> acum + x**2.) 0. beforeValues
+    let slopeStandardError = Math.Sqrt(errorsVariance/ssx)
+    slope,intercept,slopeStandardError
+
+let testSlope confidence (slope:float) slopeStandardError (sampleSize:int) slope0 =
+    let degreesOfFreedom = float <| sampleSize - 2
+    let t = StudentT(0., 0., degreesOfFreedom)
+    let rightTailProbability = 1. - (1. - confidence)/2.
+    let criticalValue = t.InverseCumulativeDistribution(rightTailProbability)
+    let tStatistic = (slope - slope0)/slopeStandardError
+    Math.Abs(tStatistic) < criticalValue
+
+let autocorrelationSignificanceForLag confidence (values:float[]) lag slope0 =
+    let slope,_,slopeStandardError = autocorrelationWithLag values lag
+    testSlope confidence slope slopeStandardError (values.Length) slope0
+
+
 // Exercises from the book Elements of Financial Risk Management, 2nd Edition by Peter F. Christoffersen. Published by AP
 // The data and solutions for the exercises are available at: http://booksite.elsevier.com/9780123744487/
 // Chapter 1 - To be done
@@ -146,79 +162,6 @@ let empiricalExpectedShortfall var =
 // Chapter 11 - To be done
 // Chapter 12 - To be done
 // Chapter 13 - To be done
-
-
-// Workshops are not from the book but the homework given by the professor of a class given at ITAM (https://www.itam.mx)
-(*
-Workshop 2
-Each month a company computes the value at risk for the next month as the minimum return of that month times the square root of 22.
-For example, the VaR for January 2008 is the minimum daily return of December 2007 times the square root of 22.
-The trading limit is $100,000 and the trader starts its trading on December 31, 2007 when he has a VaR for January and he can go long the IPC index.
-*)
-
-(*
-W2 3.- a)
-What is the 1-month 5%-VaR for January 2008?
-Compute it using monthly returns,
-using RiskMetrics with a λ=0.94,
-for the first trading day of January 2008
-*)
-let w2_3_a =
-    let data =
-        Frame.ReadCsv("..\..\Workshop2 data.csv")
-        |> Frame.indexRowsUsing toDateTime
-        |> Frame.sortRowsByKey
-    data?Return <- returnWhenLonging data
-
-    let monthlyReturns = monthlyReturns (data?Return)
-    let sampleVariance = Statistics.Variance(monthlyReturns.Values)
-
-    let monthlyVariances =
-        monthlyReturns
-        |> RiskMetrics 0.94 sampleVariance
-       
-    let varForMonth (month:DateTime) =
-        monthlyVariances.[month]
-        |> Math.Sqrt
-        |> var 0.95 0.
-
-    let january2008 = DateTime(2008,01,01)
-    varForMonth january2008
-    
-
-(*
-W2 4.- a)
-Compute de 5% Expected Shortfall for January 2008 using Historical Simulation 250 daily returns;
-do not forget to multiply it by sqrt 22.
-*)
-
-let w2_4_a =
-    let data =
-        Frame.ReadCsv("..\..\Workshop2 data.csv")
-        |> Frame.indexRowsUsing toDateTime
-        |> Frame.sortRowsByKey    
-    data?Return <- returnWhenLonging data
-
-    let ``08/01/02`` = DateTime(2008,01,02)                             // First trading date of January 2008
-    let simulationData = (nRowsBeforeKey 250 data ``08/01/02``)?Return
-    let VaR = historicalSimulation 0.95 simulationData
-
-    empiricalExpectedShortfall VaR simulationData                       // January 02 2008 expected shortfall
-    |> (*) (Math.Sqrt 22.)                                              // January 2008 expected shortfall
-
-(*
-W2 4.- b)
-Compute de 5% Expected Shortfall for January 2008 using as VaR the VaR obtained in W2 3.- a)
-*)
-let w2_4_b =
-    let VaR = w2_3_a
-    let stdDev = stdDevFromVaR 0.95 VaR
-    expectedShortfall 0.95 stdDev
-
-let workshop2 () =
-    printfn "3.- a) %f" w2_3_a
-    printfn "4.- a) %f" w2_4_a
-    printfn "4.- b) %f" w2_4_b
 
 [<EntryPoint>]
 let main argv =

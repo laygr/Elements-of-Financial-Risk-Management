@@ -55,10 +55,12 @@
   <Import Project="$(FSharpTargetsPath)" />
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
-    <Compile Include="Program.fs" />
+    <Compile Include="RiskManagement.fs" />
     <None Include="App.config" />
     <Content Include="packages.config" />
     <None Include="Workshop2 data.csv" />
+    <Compile Include="Workshop3.fs" />
+    <Compile Include="Workshop2.fs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Deedle">
