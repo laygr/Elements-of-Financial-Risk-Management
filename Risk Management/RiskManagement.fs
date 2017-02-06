@@ -5,6 +5,11 @@ open System
 open MathNet.Numerics.LinearRegression
 open MathNet.Numerics.Statistics
 open MathNet.Numerics.Distributions
+open RProvider
+open RDotNet
+open RProvider.stats
+open RProvider.fArma
+
 (*
 let toDateTime (os:ObjectSeries<_>) =
     let year = (os.Get "Year") :?> int
@@ -123,6 +128,8 @@ let empiricalExpectedShortfall var =
     >> Seq.average                          // - expected shortfall
     >> (*) -1.                              // expected shortfall
 
+// --- Chapter 3 --- //
+
 let autocorrelationWithLag (values:float[]) lag =
     let valuesLength  = values.Length
     let beforeValues = Array.init (lag + valuesLength) (fun i -> if i < lag then 0. else values.[i-lag])
@@ -133,6 +140,7 @@ let autocorrelationWithLag (values:float[]) lag =
     let ssx = Array.fold (fun acum x -> acum + x**2.) 0. beforeValues
     let slopeStandardError = Math.Sqrt(errorsVariance/ssx)
     slope,intercept,slopeStandardError
+
 
 let testSlope confidence (slope:float) slopeStandardError (sampleSize:int) slope0 =
     let degreesOfFreedom = float <| sampleSize - 2
@@ -146,24 +154,21 @@ let autocorrelationSignificanceForLag confidence (values:float[]) lag slope0 =
     let slope,_,slopeStandardError = autocorrelationWithLag values lag
     testSlope confidence slope slopeStandardError (values.Length) slope0
 
+// tests if the jointly autocorrelation is zero up to "autocorrelations.Length" lags
+// autocorrelations from smaller lag to larger lag
+let ljung_boxTest confidence (autocorrelations:float[]) =
+    let nautocorrelations = float autocorrelations.Length
+    let autocorrelations_index = Array.zip autocorrelations [|1. .. nautocorrelations|]
+    let lb = nautocorrelations * (nautocorrelations + 2.) + Seq.fold (fun acum (autocorrelation,i)-> acum + (autocorrelation**2./(nautocorrelations - i))) 0. autocorrelations_index
 
-// Exercises from the book Elements of Financial Risk Management, 2nd Edition by Peter F. Christoffersen. Published by AP
-// The data and solutions for the exercises are available at: http://booksite.elsevier.com/9780123744487/
-// Chapter 1 - To be done
-// Chapter 2 - To be done
-// Chapter 3 - To be done
-// Chapter 4 - To be done
-// Chapter 5 - To be done
-// Chapter 6 - To be done
-// Chapter 7 - To be done
-// Chapter 8 - To be done
-// Chapter 9 - To be done
-// Chapter 10 - To be done
-// Chapter 11 - To be done
-// Chapter 12 - To be done
-// Chapter 13 - To be done
+    let chisquared = new ChiSquared(nautocorrelations)
+    let criticalValue = chisquared.InverseCumulativeDistribution(confidence)
+    lb <= criticalValue
 
-[<EntryPoint>]
-let main argv =
-    workshop2 ()
-    0
+let arma p q (data:float list) =
+    R.eval(R.parse(text="library(fArma)")) |> ignore
+    let dataset =
+        namedParams [ "xx", data ]
+        |>R.data_frame
+    let s4 = R.armaFit(R.as_formula("xx ~ arma(2,2)"), dataset).AsS4()
+    s4.["fit"].AsList().["coef"].AsNumeric().ToArray()
