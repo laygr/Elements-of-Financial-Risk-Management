@@ -2,16 +2,16 @@
 <package >
   <metadata>
     <id>EFRM</id>
-    <version>0.0.0.1</version>
+    <version>0.0.0.2</version>
     <title>$title$</title>
     <authors>Jesús Irais González Romero</authors>
     <owners>Jesús Irais González Romero</owners>
     <licenseUrl>http://copyleft.org</licenseUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
-    <description>Algorithms and solutions for the book Elements of Financial Risk Management by Peter F. Christoffersen written in F#</description>
+    <description>Algorithms and solutions for the book written on F#</description>
     <projectUrl>https://github.com/laygr/Elements-of-Financial-Risk-Management</projectUrl>
     <releaseNotes>Experimental</releaseNotes>
-    <copyright>Copyright 2017</copyright>
+    <copyright>Copyleft</copyright>
     <tags>Risk Finance</tags>
   </metadata>
 </package>
