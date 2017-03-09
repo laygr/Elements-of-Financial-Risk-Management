@@ -15,6 +15,18 @@ module CovarianceAndCorrelationModels =
                 |> Seq.map (fun (q, zA, zB) -> riskMetrics q (zA*zB) lambda)
         }
 
+    // P. 164
+    let rec ``q garch(1, 1)-type`` alpha beta rhoAB zA zB initialQ =
+        let ``q t+1 garch(1, 1)-type`` alpha beta rhoAB (``zA t``, ``zB t``, ``q t``) : float =
+            rhoAB + alpha*(``zA t``*``zB t``- rhoAB) + beta*(``q t`` - rhoAB)
+
+        seq {
+            yield initialQ
+            yield!
+                Seq.zip3 zA zB (``q garch(1, 1)-type`` alpha beta rhoAB zA zB initialQ)
+                |> Seq.map (``q t+1 garch(1, 1)-type`` alpha beta rhoAB)
+        }
+
     // P. 161
     let correlationTargeting zA zB =
         (sumProduct zA zB) / (float <| Seq.length zA)

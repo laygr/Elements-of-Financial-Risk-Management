@@ -180,3 +180,6 @@ module Core =
             |>R.data_frame
         let s4 = R.armaFit(R.as_formula("xx ~ arma(2,2)"), dataset).AsS4()
         s4.["fit"].AsList().["coef"].AsNumeric().ToArray()
+
+
+    let ``garch(1, 1)`` 
