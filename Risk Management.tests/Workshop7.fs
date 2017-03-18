@@ -10,14 +10,8 @@ module Workshop7 =
 
     // Workshop 7-3
     let ``workshop 7-3`` vimexReturns ipcReturns bondReturns initialVariance lambda =
-        
         let rec varianceRM returns =
-            seq {
-                yield initialVariance
-                yield!
-                    Seq.zip (varianceRM returns) returns
-                    |> Seq.map (fun (var, ret) -> riskMetrics var (ret**2.) lambda)
-            }
+            TimeSeries.riskMetrics lambda initialVariance returns
 
         let vimexVarRM, ipcVarRM, bondVarRM =
             varianceRM vimexReturns,

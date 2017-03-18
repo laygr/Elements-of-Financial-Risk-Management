@@ -5,13 +5,12 @@ module Workshop4 =
     open System
     open MathNet.Numerics.Statistics
     open Core
+    open RiskManagement.Workshops
 
     let w4_1 (frame:Frame<int,string>) =
-        let data =
-            frame
-            |> Frame.indexRowsUsing toDateTime
-            |> Frame.sortRowsByKey
-        data?Return <- returnWhenLonging data "IPC"
+        let data = Common.loadFrameFromCsv "..\..\Workshop2 data.csv" "Date"
+        data?Return <- Series.returns Logarithmic Long (Frame.getCol "IPC" data)
+
         let returns = 
             Frame.getCol "Return" data
             |> Series.values

@@ -1,9 +1,10 @@
-﻿namespace RiskManagement
+﻿namespace RiskManagement.Workshops
 
 module Workshop2 =
     open Deedle
     open System
     open MathNet.Numerics.Statistics
+    open RiskManagement
     open Core
 
     // Workshops are not from the book but the homework given by the professor of a class given at ITAM (https://www.itam.mx)
@@ -22,18 +23,19 @@ module Workshop2 =
     for the first trading day of January 2008
     *)
     let w2_3_a =
-        let data =
-            Frame.ReadCsv("..\..\Workshop2 data.csv")
-            |> Frame.indexRowsUsing toDateTime
-            |> Frame.sortRowsByKey
-        data?Return <- returnWhenLonging data "Close"
+        let data = Common.loadFrameFromCsv "..\..\Workshop2 data.csv" "Date"
+        let prices = 
+            (Frame.getCol "Close" data)
+            |> Series.toTimeSeries TimeSeries.Daily
+
+        data?Return <- prices.Returns Logarithmic Long
 
         let monthlyReturns = monthlyReturns (data?Return)
         let sampleVariance = Statistics.Variance(monthlyReturns.Values)
 
         let monthlyVariances =
             monthlyReturns
-            |> RiskMetrics 0.94 sampleVariance
+            |> Series.riskMetrics 0.94 sampleVariance
        
         let varForMonth (month:DateTime) =
             monthlyVariances.[month]
@@ -42,7 +44,6 @@ module Workshop2 =
 
         let january2008 = DateTime(2008,01,01)
         varForMonth january2008
-    
 
     (*
     W2 4.- a)
@@ -51,11 +52,8 @@ module Workshop2 =
     *)
 
     let w2_4_a =
-        let data =
-            Frame.ReadCsv("..\..\Workshop2 data.csv")
-            |> Frame.indexRowsUsing toDateTime
-            |> Frame.sortRowsByKey    
-        data?Return <- returnWhenLonging data "Close"
+        let data = Common.loadFrameFromCsv "..\..\Workshop2 data.csv" "Date"
+        data?Return <- Series.returns Logarithmic Long (Frame.getCol "Close" data)
 
         let ``08/01/02`` = DateTime(2008,01,02)                             // First trading date of January 2008
         let simulationData = (nRowsBeforeKey 250 data ``08/01/02``)?Return

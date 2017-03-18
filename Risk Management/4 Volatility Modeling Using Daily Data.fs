@@ -3,38 +3,29 @@ module VolatilityModelingUsingDailyData =
     open System
     open Accord.Math.Optimization
     open System.Collections.Generic
+    open Core
 
     // P. 70
-    let ``garch(1, 1)`` alpha beta omega returns initialVariance =
+    let ``variances from garch(1, 1)`` alpha beta omega returns initialVariance =
         let ``variance t`` (``variance t-1``, ``return t-1``) =
                 omega + beta * ``variance t-1`` + alpha * ``return t-1``**2.
 
-        let rec variances =
-            seq {
-                yield initialVariance
-                yield!
-                    Seq.zip variances returns
-                    |> Seq.map ``variance t``
-            }
-        variances
+        TimeSeries.``garch(1, 1)`` ``variance t`` initialVariance returns
 
-    let ``maximize garch(1, 1)`` returns initialVariance (vars:float[]) =
+    let ``maximize garch(1, 1)`` returns initialVariance =
         let alphaIndex, betaIndex, omegaIndex = 0, 1, 2
 
-        let sumOfLogLikelihoods (returns':float[]) (vars:float[]) =
-           let returns = Seq.ofArray returns'
+        let sumOfLogLikelihoods (vars:float[]) =
 
-           let alpha, beta, omega = vars.[alphaIndex], vars.[betaIndex], vars.[omegaIndex]
-           let variances = ``garch(1, 1)`` alpha beta omega returns initialVariance
+            let alpha, beta, omega = vars.[alphaIndex], vars.[betaIndex], vars.[omegaIndex]
+            let variances = ``variances from garch(1, 1)`` alpha beta omega returns initialVariance
 
-           let logLikelihood (var, ret) =
+            let logLikelihood (var, ret) =
                 -1. / 2. * (log var + ret**2. / var)
-
-           let logLikelihoods =
-                Seq.zip variances returns
-                |> Seq.map logLikelihood
-
-           Seq.sum (Seq.take 314 logLikelihoods)
+                
+            Seq.zip variances returns
+            |> Seq.map logLikelihood
+            |> Seq.sum
 
         let persistence (vars:float[]) =
             vars.[alphaIndex] + vars.[betaIndex]
@@ -42,7 +33,7 @@ module VolatilityModelingUsingDailyData =
         let var index (vars:float[]) =
             vars.[index]
 
-        let obj = NonlinearObjectiveFunction(3, (sumOfLogLikelihoods returns))
+        let obj = NonlinearObjectiveFunction(3, sumOfLogLikelihoods)
         let constraints = List<NonlinearConstraint>()
         constraints.Add(NonlinearConstraint(obj, persistence, ConstraintType.LesserThanOrEqualTo, 0.99999))
         constraints.Add(NonlinearConstraint(obj, (var 0), ConstraintType.GreaterThanOrEqualTo, 0.0))
@@ -51,11 +42,17 @@ module VolatilityModelingUsingDailyData =
         let solver = Cobyla(obj, constraints)
         
         let success = solver.Maximize()
-        let value = solver.Value
+        let loglikelihood = solver.Value
         let solution = solver.Solution
         let status = solver.Status
         dict [
             "alpha", solution.[0]
             "beta", solution.[1]
             "omega", solution.[2]
-        ], value
+        ], loglikelihood
+
+    let ``already optimized variances from garch(1, 1)`` returns initialVariance =
+        let parameters,_ = ``maximize garch(1, 1)`` returns initialVariance
+        let alpha, beta, omega = parameters.["alpha"], parameters.["beta"], parameters.["omega"]
+
+        ``variances from garch(1, 1)`` alpha beta omega returns initialVariance

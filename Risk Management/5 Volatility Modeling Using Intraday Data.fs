@@ -1,0 +1,3 @@
+﻿namespace RiskManagement
+module VolatilityModelingUsingIntradayData =
+    ()

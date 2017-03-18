@@ -60,11 +60,13 @@
     <Compile Include="AssemblyInfo.fs" />
     <Content Include="packages.config" />
     <None Include="App.config" />
+    <Compile Include="Workshops.fs" />
     <Compile Include="Workshop2.fs" />
     <Compile Include="Workshop3.fs" />
     <Compile Include="Workshop4.fs" />
+    <Compile Include="Workshop6.fs" />
     <Compile Include="Workshop7.fs" />
-    <Compile Include="NonnormalDistributions.fs" />
+    <Compile Include="6 NonnormalDistributions.fs" />
     <Compile Include="Exercises.fs" />
     <Compile Include="ManualTests.fs" />
   </ItemGroup>

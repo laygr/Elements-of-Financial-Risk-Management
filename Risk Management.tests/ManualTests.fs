@@ -26,5 +26,6 @@ module ManualTests =
     
     [<EntryPoint>]
     let main args =
-        manualTestsForNonnormalDistributions()
+        Workshop6.manualTests()
+        //manualTestsForNonnormalDistributions()
         0

@@ -8,12 +8,9 @@ module CovarianceAndCorrelationModels =
     // P. 160
     // Correlation dynamics by RiskMetrics
     let rec qRM lambda zA zB initialQ =
-        seq {
-            yield initialQ
-            yield!
-                Seq.zip3 (qRM lambda zA zB initialQ) zA zB
-                |> Seq.map (fun (q, zA, zB) -> riskMetrics q (zA*zB) lambda)
-        }
+        Seq.zip zA zB
+        |> Seq.map (fun (zA, zB) -> zA * zB)
+        |> TimeSeries.riskMetrics lambda initialQ
 
     // P. 164
     let rec ``q garch(1, 1)-type`` alpha beta rhoAB zA zB initialQ =

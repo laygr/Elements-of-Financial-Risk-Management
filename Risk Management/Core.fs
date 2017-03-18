@@ -1,4 +1,28 @@
 ﻿namespace RiskManagement
+module RMStatistics =
+    type IRMContinuousDistribution =
+        abstract member InverseCumulativeDistribution : float -> float
+
+    type RMStudentT(location, scale, degreesOfFreedom) =
+        let distribution = MathNet.Numerics.Distributions.StudentT(location, scale, degreesOfFreedom)
+
+        interface IRMContinuousDistribution with
+            member this.InverseCumulativeDistribution probability =
+                distribution.InverseCumulativeDistribution probability
+
+    type HypothesisTestResult = | AcceptNullHypothesis | RejectNullHypothesis
+
+    let hypothesisTest (distribution:IRMContinuousDistribution) realValue nullHypothesisValue confidence standardError =
+        let rightTailProbability = 1. - (1. - confidence)/2.
+        let leftTailProbability = confidence/2.
+        let rightCriticalValue = distribution.InverseCumulativeDistribution rightTailProbability
+        let leftCriticalValue = distribution.InverseCumulativeDistribution leftTailProbability
+        let tStatistic = (realValue - nullHypothesisValue)/standardError
+
+        if tStatistic >= leftCriticalValue && tStatistic <= rightCriticalValue
+        then AcceptNullHypothesis
+        else RejectNullHypothesis
+
 module Core =
 
     open Deedle
@@ -11,71 +35,64 @@ module Core =
     open RProvider.stats
     open RProvider.fArma
 
-    (*
-    let toDateTime (os:ObjectSeries<_>) =
-        let year = (os.Get "Year") :?> int
-        let month = (os.Get "Month" :?> int)
-        let day = (os.Get "Day" :?> int)
-        DateTime(year,month,day)
-    *)
+    type VaRMethod =
+        | HistoricalSimulation
+        | WeightedHistoricalSimulation
+        | Statistical
 
-    let toDateTime (os:ObjectSeries<_>) =
-        (os.Get "Date" :?> string)
-        |> DateTime.Parse
+    type ReturnKind = | Logarithmic | Arithmetic
 
-    let returnWhenLonging (frame:Frame<DateTime,string>) columnName =
-        let close = Frame.getCol columnName frame
+    type Position = | Long | Short
     
-        log close - log (Series.shift 1 close)
+    type Returns = {
+        Sequence : float seq
+        Kind : ReturnKind
+    }
 
-    let returnWhenShorting (frame:Frame<DateTime,string>) columnName =
-        let close = Frame.getCol columnName frame
+    type VaR = {
+        CoverageRate : float // p. 22
+        VaR : float
+        Method : VaRMethod
+    }
 
-        log (Series.shift 1 close) - log close
+    type ES = {
+        VaR : VaR
+        ES : float
+    }
 
-    let riskMetrics a b lambda =
-        lambda * a + (1. - lambda) * b
+    let excelPercentile values percentile =
+        let sorted = Seq.sort values
+        (Statistics.quantileCustomFunc sorted QuantileDefinition.Excel) percentile
 
-    // page 12
-    let RiskMetrics lambda startingVariance (series:Series<DateTime,float>) =
-        let next pastVariance' pastReturn' =
-            match pastVariance', pastReturn' with
-            | Some pastVariance, Some pastReturn -> Some (lambda * pastVariance + (1.-lambda) * pastReturn ** 2.)
-            | _ -> pastVariance'
+    let returnsForPrices position method prices =
+        let multiplier = if position = Long then 1. else -1.
+        let f (``t``, ``t+1``) =
+            multiplier *
+                if method = Logarithmic
+                then log ``t+1`` - log ``t``
+                else (``t+1``-``t``)/``t``
+        Seq.pairwise prices
+        |> Seq.map f
 
-        Series.shift 1 series
-        |> Series.scanAllValues next (Some startingVariance)
-
-    let nDaysBefore days (data:Frame<_,_>) day =
-        data.GetSubrange(None, Some (day, Indices.Exclusive))
-        |> Frame.takeLast days
-
-    // index for row with key
-    // index starting at 0
-    let indexForKey (frame:Frame<'K,_>) (key:'K) =
-        frame.RowIndex.Locate key
-        |> frame.RowIndex.AddressOperations.OffsetOf
-
-    // position of row with key.
-    // Index beginning with 1
-    let positionForKey (frame:Frame<'K,_>) (key:'K) =
-        indexForKey frame key
-        |> (+) (int64 1)
-
-    let nRowsBeforeKey rows (data:Frame<_,_>) key =
-        data
-        |> Frame.take (int (indexForKey data key))
-        |> Frame.takeLast rows
-
-    let mapKey (f:'a -> 'b) (frame:Frame<_,_>) =
-        Series.map (fun k _ -> f k) (frame.GetColumnAt 0)
-
+    // p. 8
+    let changeReturnsKind newKind returns =
+        if newKind = returns.Kind
+        then returns
+        else
+            let newSequence =
+                returns.Sequence
+                |> match newKind with
+                   | Arithmetic -> Seq.map (fun ret -> (Math.Exp ret) - 1.)
+                   | Logarithmic -> Seq.map (fun ret -> Math.Log (ret + 1.))
+            
+            { Sequence = newSequence; Kind = newKind }
+            
     let historicalSimulation confidence =
         Series.values
         >> fun v -> Statistics.quantileCustomFunc v QuantileDefinition.Excel
         >> (|>) (1. - confidence)
         >> (*) -1.
-
+        
     let weightedHistoricalSimulation confidence eta (data':Frame<DateTime,_>) =
         let data = data'.Clone()
         let days = data.RowCount
@@ -117,19 +134,7 @@ module Core =
         let p = 1. - confidence
         let normal = MathNet.Numerics.Distributions.Normal()
         stdDev * normal.Density(normal.InverseCumulativeDistribution(p)) / p
-
-    let monthlyReturns (series:Series<DateTime,_>) =
-        let aggregator = Aggregation.ChunkWhile<DateTime>(fun a b -> a.Year = b.Year && a.Month = b.Month)
-        let keyGen (s:DataSegment<Series<DateTime,float>>) =
-            let firstDayOfMonth (date:DateTime) = DateTime(date.Year, date.Month, 1)
-            firstDayOfMonth (s.Data.FirstKey())
-        let valueGen (s:DataSegment<Series<DateTime,float>>) =
-            Seq.sum s.Data.Values
-            |> Some
-            |> OptionalValue.ofOption
-
-        Series.aggregateInto aggregator keyGen valueGen series
-
+        
     let empiricalExpectedShortfall var =
         Series.filter (fun _ ret -> ret < -var) // returns worse than -var
         >> Series.values
@@ -137,42 +142,7 @@ module Core =
         >> (*) -1.                              // expected shortfall
 
     // --- Chapter 3 --- //
-
-    let autocorrelationWithLag (values:float[]) lag =
-        let valuesLength  = values.Length
-        let beforeValues = Array.init (lag + valuesLength) (fun i -> if i < lag then 0. else values.[i-lag])
-        let afterValues = Array.init (lag + valuesLength) (fun i -> if i >= valuesLength then 0. else values.[i])
-        let (slope,intercept) = SimpleRegression.Fit(beforeValues,afterValues)
-        let errors = Array.init (lag + valuesLength ) (fun i -> afterValues.[i] - intercept - slope * beforeValues.[i])
-        let errorsVariance = Statistics.Variance errors
-        let ssx = Array.fold (fun acum x -> acum + x**2.) 0. beforeValues
-        let slopeStandardError = Math.Sqrt(errorsVariance/ssx)
-        slope,intercept,slopeStandardError
-
-
-    let testSlope confidence (slope:float) slopeStandardError (sampleSize:int) slope0 =
-        let degreesOfFreedom = float <| sampleSize - 2
-        let t = StudentT(0., 0., degreesOfFreedom)
-        let rightTailProbability = 1. - (1. - confidence)/2.
-        let criticalValue = t.InverseCumulativeDistribution(rightTailProbability)
-        let tStatistic = (slope - slope0)/slopeStandardError
-        Math.Abs(tStatistic) < criticalValue
-
-    let autocorrelationSignificanceForLag confidence (values:float[]) lag slope0 =
-        let slope,_,slopeStandardError = autocorrelationWithLag values lag
-        testSlope confidence slope slopeStandardError (values.Length) slope0
-
-    // tests if the jointly autocorrelation is zero up to "autocorrelations.Length" lags
-    // autocorrelations from smaller lag to larger lag
-    let ljung_boxTest confidence (autocorrelations:float[]) =
-        let nautocorrelations = float autocorrelations.Length
-        let autocorrelations_index = Array.zip autocorrelations [|1. .. nautocorrelations|]
-        let lb = nautocorrelations * (nautocorrelations + 2.) + Seq.fold (fun acum (autocorrelation,i)-> acum + (autocorrelation**2./(nautocorrelations - i))) 0. autocorrelations_index
-
-        let chisquared = new ChiSquared(nautocorrelations)
-        let criticalValue = chisquared.InverseCumulativeDistribution(confidence)
-        lb <= criticalValue
-
+    
     let arma p q (data:float list) =
         R.eval(R.parse(text="library(fArma)")) |> ignore
         let dataset =
@@ -180,6 +150,3 @@ module Core =
             |>R.data_frame
         let s4 = R.armaFit(R.as_formula("xx ~ arma(2,2)"), dataset).AsS4()
         s4.["fit"].AsList().["coef"].AsNumeric().ToArray()
-
-
-    let ``garch(1, 1)`` 

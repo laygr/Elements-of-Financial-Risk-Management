@@ -59,10 +59,16 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Utils.fs" />
+    <Compile Include="DeedleExtensions.fs" />
     <Compile Include="Core.fs" />
+    <Compile Include="1 Risk Management and Financial Returns.fs" />
+    <Compile Include="2 Historical Simulation, VaR And ExpectedShortfall.fs" />
+    <Compile Include="3 A Primer on Financial Time Series Analysis.fs" />
     <Compile Include="4 Volatility Modeling Using Daily Data.fs" />
+    <Compile Include="5 Volatility Modeling Using Intraday Data.fs" />
     <Compile Include="6 Nonnormal Distributions.fs" />
     <Compile Include="7 CovarianceAndCorrelationModels.fs" />
+    <Compile Include="8 Simulating the Term Structure of Risk.fs" />
     <None Include="App.config" />
     <Content Include="packages.config" />
   </ItemGroup>
